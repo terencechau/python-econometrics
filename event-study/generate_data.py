@@ -19,14 +19,11 @@ panel = pd.DataFrame([(i, t) for i in units for t in times], columns=['unit', 't
 
 # Assign treatment status (ever treated)
 treated_units = np.random.choice(units, size=int(prob_treated * n_units), replace=False)
-panel['treated'] = panel['unit'].isin(treated_units)
-panel['ever_treated'] = panel['treated'].astype(int)
-
-# Indicator for post-treatment period
-panel['post_treatment'] = (panel['time'] >= treatment_time).astype(int)
+panel['ever_treated'] = panel['unit'].isin(treated_units).astype(int)
+# panel['ever_treated'] = panel['treated'].astype(int)
 
 # Actual treatment occurs only for treated units in post-treatment periods
-panel['treatment'] = panel['treated'] & (panel['time'] >= treatment_time)
+panel['treated'] = (panel['ever_treated'] & (panel['time'] >= treatment_time)).astype(int)
 
 # Unit fixed effects and time trends
 unit_fe = np.random.normal(0, 1, n_units)
@@ -42,7 +39,7 @@ panel['epsilon'] = np.random.normal(0, 1, panel.shape[0])
 panel['y'] = (
     panel['unit_fe'] +
     panel['time_fe'] +
-    panel['treatment'] * treatment_effect +
+    panel['treated'] * treatment_effect +
     panel['epsilon']
 )
 
