@@ -55,3 +55,5 @@ panel = panel.sort_values(by=['unit', 'time']).reset_index(drop=True)
 
 # Preview data
 print(panel.head())
+
+panel.to_csv("output/panel_data.csv", index=False)
