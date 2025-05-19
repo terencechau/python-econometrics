@@ -14,7 +14,7 @@ static_did = pf.feols(
 )
 pf.etable(static_did)
 
-# Estimate dynamic DID
+# Estimate dynamic DID with simultaneous treatment
 # Compare three methods: have never treated units get -1 event time, 0 event time, and 999 event time (and omit that 999 indicator). All methods omit the -1 indicator.
 # Note, you can skip the indicator creation by writing a formula like "y ~ i(event_time, ref = -1) | unit + time", but that results in really messy coefficient names like C(event_time, contr.treatment(base=-1))[T.-5]
 
