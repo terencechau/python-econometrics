@@ -1,61 +1,34 @@
-# This code estimates static and dynamic two way fixed effects regressions when treatment is simultaneous and when treatment is staggered.
-# For dynamic regressions, it compares three methods: have never treated units get -1 event time, 0 event time, and 999 event time (and omit that 999 indicator). All methods omit the -1 indicator.
-
 import pandas as pd
 import numpy as np
 import pyfixest as pf
 import re
 
-def run_dynamic_did(panel, control_event_time_value, drop_terms):
-    df = panel.copy()
+from event_study_functions import *
 
-    # Assign event_time
-    # The if-else statement bakes in the interaction
-    df["event_time"] = np.where(
-        df["ever_treated"] == 1,
-        df["time"] - df["treatment_time"],
-        control_event_time_value
-    ) 
-
-    # Create dummies and rename
-    # Note: writing a formula like "y ~ i(event_time, ref = -1) | unit + time", skips this step, but that leads to messy coefficient names
-    leads_lags = pd.get_dummies(df["event_time"].astype(int), prefix="T")
-    leads_lags.columns = [col.replace("-", "minus_") for col in leads_lags.columns]
-
-    # Drop reference + optional control group dummy
-    leads_lags = leads_lags.drop(columns=drop_terms, errors="ignore")
-
-    # Add to data
-    df = pd.concat([df, leads_lags], axis=1)
-
-    # Construct formula
-    rhs_terms = " + ".join(leads_lags.columns)
-    formula = f"y ~ {rhs_terms} | unit + time"
-
-    return pf.feols(formula, data=df, vcov={"CRV1": "unit_fe"})
+# Interesting partial regression quirk: for dynamic regressions, people usually assign never treateds to event time -999 or some other bogus value and omit that lead/lag. You can actually assign never treated units to any event time value, even ones that include ever treated units, like -1 or 0. The regressions will be the same because those values have no variation within fixed effects. Example:
 
 def generate_did_table(panel_path):
-    panel = pd.read_csv(panel_path)
+    df = pd.read_csv(panel_path)
 
     # Estimate static DID
     # CRV1 matches R's fixest standard error
     static_did = pf.feols(
         fml="y ~ treated|unit + time ", 
-        data=panel, 
+        data=df, 
         vcov={"CRV1": "unit_fe"}
     )
 
     # Estimate dynamic DID
     dynamic_did_minus_1 = run_dynamic_did(
-        panel, control_event_time_value=-1, 
+        panel_path, control_event_time_value=-1, 
         drop_terms=["T_minus_1"]
     )
     dynamic_did_0 = run_dynamic_did(
-        panel, control_event_time_value=0, 
+        panel_path, control_event_time_value=0, 
         drop_terms=["T_minus_1"]
     )
     dynamic_did_999 = run_dynamic_did(
-        panel, control_event_time_value=999, 
+        panel_path, control_event_time_value=999, 
         drop_terms=["T_minus_1", "T_999"]
     )
 
@@ -68,29 +41,7 @@ generate_did_table("output/panel_data_simultaneous.csv")
 generate_did_table("output/panel_data_staggered.csv")
 
 # Why are they equivalent?
-# A. Are the datasets equivalent?
-def prep_dynamic_did_data(panel_path, control_event_time_value, drop_terms):
-    panel = pd.read_csv(panel_path)
-    df = panel.copy()
-
-    # Assign event_time
-    df["event_time"] = np.where(
-        df["ever_treated"] == 1,
-        df["time"] - df["treatment_time"],
-        control_event_time_value
-    )
-
-    # Create dummies and rename
-    leads_lags = pd.get_dummies(df["event_time"].astype(int), prefix="T")
-    leads_lags.columns = [col.replace("-", "minus_") for col in leads_lags.columns]
-
-    # Drop reference + optional control group dummy
-    leads_lags = leads_lags.drop(columns=drop_terms, errors="ignore")
-
-    # Add to data and estimate
-    df = pd.concat([df, leads_lags], axis=1)
-    return df
-
+# First, note that the datasets for -1 and 999 are equivalent. In both cases, never treateds are being lumped into a lead or lag that is omitted from the regression, so all their lead/lag values are blocks of zeros.
 df_minus_1 = prep_dynamic_did_data(
     panel_path="output/panel_data_simultaneous.csv", 
     control_event_time_value=-1, 
@@ -112,14 +63,10 @@ df_999 = prep_dynamic_did_data(
 )
 df_999 = df_999.filter(regex="^y$|^unit$|^time$|^T_")
 
-df_minus_1.equals(df_0)
 df_minus_1.equals(df_999)
 df_0.equals(df_999)
 
-# The -1 and 999 datasets are equivalent, but not the 0 (which has a lot more 1s in the T_0 indicator), so it makes sense that the -1 and 999 lead to identical estimates. Next, we have to show why the 999 dataset and the 0 dataset lead to the same estimates, despite being different.
-
-# B. Is it that never treateds only identify time fixed effects?
-# Proposed test: partial out time fixed effects from y and from the leads and lags, then estimate residual y on residual leads and lags for both datasets.
+# Then, for the ones where leads/lags are blocks of ones for never treated units, those will be collinear with group fixed effects. You can see this by partialing out time and group fixed effects separately from y and from the leads and lags, then estimate residual y on residual leads and lags for both datasets.
 
 def partial_out_fe(panel, var, fe):
     model = pf.feols(fml=f"{var} ~ 1|{fe}", data=panel)
@@ -153,9 +100,7 @@ res_on_res_time_999 = test_fe_residuals(df_999, "time")
 
 pf.etable([res_on_res_time_0, res_on_res_time_999])
 
-# Partialing out time variation leads to almost identical estimates for each lead and lag except for the T_0 residual, as expected.
-
-# Next test: then, do some similar check for group fixed effects, there has to be something about never treateds having no remaining variation in T_0 or something
+# Partialing out time variation leads to almost identical estimates for each lead and lag except for the T_0 residual, as expected. Partialing out unit fixed effects leads to identical regressions.
 
 res_on_res_unit_0 = test_fe_residuals(df_0, "unit")
 res_on_res_unit_999 = test_fe_residuals(df_999, "unit")
